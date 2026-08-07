@@ -1,0 +1,37 @@
+# Ambientes virtuais Python
+.venv/
+venv/
+ENV/
+env/
+
+# Arquivos compilados/otimizados/DLL
+__pycache__/
+*.py[cod]
+*$py.class
+
+
+
+# Configurações da IDE/editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Variáveis de ambiente locais
+.env
+.env.*
+
+# Perfil do Chrome local
+perfil_chrome/
+
+# Diversos
+*.log
+*.pot
+*.mo
+.DS_Store
+
+# Cache de egg do Python
+.eggs/
+
+# MyPy
+.mypy_cache/
