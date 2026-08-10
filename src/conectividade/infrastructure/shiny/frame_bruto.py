@@ -35,3 +35,18 @@ class FrameBruto:
     recalculando: dict[str, object] | None
     """Conteúdo de `payload["recalculating"]`, quando o frame é apenas um
     aviso de início/fim de processamento (sem dado de negócio)."""
+
+
+@dataclass(frozen=True, slots=True)
+class FrameFechamento:
+    """Representa um frame de fechamento do socket SockJS (`TAG#CONTADOR|c|JSON`).
+
+    O Shiny usa esse tipo de frame para avisar que o socket vai fechar —
+    seja um fechamento normal (código 1000) ou porque a aplicação no
+    servidor caiu/reiniciou (ex.: código 4503, "The application
+    unexpectedly exited"). Diferente de `FrameBruto`, não carrega dados
+    de negócio: só o motivo do fechamento.
+    """
+
+    code: int
+    reason: str

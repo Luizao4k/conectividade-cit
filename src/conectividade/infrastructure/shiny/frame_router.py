@@ -81,7 +81,13 @@ class RoteadorDeFrames:
                 print(f"  [DECISÃO] Frame sem valores -> ignorar")
             return []
 
-        # Tenta cada parser
+        # Tenta cada parser. Um mesmo frame pode conter campos de mais de um
+        # domínio ao mesmo tempo (ex.: dados de escola e de conectividade
+        # misturados) — por isso TODOS os parsers são testados, não só o
+        # primeiro que reconhecer. Parar no primeiro match descartava
+        # silenciosamente os campos dos outros domínios presentes no frame.
+        resultados: list[FrameProcessado] = []
+
         for i, parser in enumerate(self._parsers):
             parser_nome = parser.__class__.__name__
             
@@ -95,11 +101,10 @@ class RoteadorDeFrames:
                         print(f"  [MATCH] {parser_nome} reconheceu o frame!")
                     
                     resultado = parser.parse(frame.valores)
+                    resultados.append(resultado)
                     
                     if self._debug:
                         print(f"  [RESULTADO] {type(resultado).__name__}: {resultado}")
-                    
-                    return [resultado]
                 else:
                     if self._debug:
                         print(f"  [NO MATCH] {parser_nome} NÃO reconheceu")
@@ -109,6 +114,9 @@ class RoteadorDeFrames:
                     print(f"  [ERRO] {parser_nome} falhou: {e}")
                     import traceback
                     traceback.print_exc()
+
+        if resultados:
+            return resultados
 
         # Nenhum parser reconheceu
         if self._debug:

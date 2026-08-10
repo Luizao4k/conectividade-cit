@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import fields, replace
+from typing import TypeVar
 
 from conectividade.domain.consulta_escola import ConsultaEscola
 from conectividade.domain.erro_consulta import ErroConsulta
@@ -12,11 +13,33 @@ from conectividade.infrastructure.shiny.dtos import (
     FrameProcessado,
     ProvedoresFrameDTO,
 )
+from conectividade.infrastructure.shiny.frame_bruto import FrameFechamento
 from conectividade.infrastructure.shiny.mapeadores import (
     mapear_conectividade,
     mapear_escola,
     mapear_provedores,
 )
+
+_TDto = TypeVar("_TDto", EscolaFrameDTO, ConectividadeFrameDTO, ProvedoresFrameDTO)
+
+
+def _merge_dto(existente: _TDto | None, novo: _TDto) -> _TDto:
+    """Combina um DTO parcial novo com o estado acumulado, campo a campo.
+
+    Cada frame do Shiny costuma trazer só um subconjunto dos campos de um
+    domínio (ex.: um frame traz `nome_escola`/`uf_escola`, outro traz
+    `medicoes_escola`/`max_95_down`). O merge preserva o que já foi visto:
+    um campo só é sobrescrito quando o novo frame realmente traz um valor
+    para ele; caso contrário o valor acumulado anteriormente é mantido.
+    """
+    if existente is None:
+        return novo
+
+    atualizacoes = {
+        campo.name: getattr(novo, campo.name) or getattr(existente, campo.name)
+        for campo in fields(existente)
+    }
+    return replace(existente, **atualizacoes)
 
 
 class AgregadorDeConsulta:
@@ -29,53 +52,40 @@ class AgregadorDeConsulta:
         self._conectividade: ConectividadeFrameDTO | None = None
         self._provedores: ProvedoresFrameDTO | None = None
         self._erros: list[ErroFrameDTO] = []
+        self._fechamento_anormal: FrameFechamento | None = None
+
+    def registrar_fechamento(self, fechamento: FrameFechamento) -> None:
+        """Registra um frame de fechamento do socket.
+
+        Código 1000 é fechamento normal (a consulta seguiu seu curso e o
+        socket foi encerrado depois) e é ignorado aqui. Qualquer outro
+        código (ex.: 4503 "The application unexpectedly exited") indica
+        que o servidor derrubou a aplicação Shiny no meio da consulta —
+        guardamos isso para `_aguardar_conclusao` poder abortar na hora,
+        em vez de estourar o timeout inteiro com um erro genérico.
+        """
+        if fechamento.code != 1000 and self._fechamento_anormal is None:
+            self._fechamento_anormal = fechamento
+
+    @property
+    def fechamento_anormal(self) -> FrameFechamento | None:
+        return self._fechamento_anormal
 
     def registrar(self, processado: FrameProcessado) -> None:
         if isinstance(processado, EscolaFrameDTO):
-            self._merge_escola(processado)
+            self._escola = _merge_dto(self._escola, processado)
             return
 
         if isinstance(processado, ConectividadeFrameDTO):
-            self._conectividade = processado
+            self._conectividade = _merge_dto(self._conectividade, processado)
             return
 
         if isinstance(processado, ProvedoresFrameDTO):
-            self._provedores = processado
+            self._provedores = _merge_dto(self._provedores, processado)
             return
 
         if isinstance(processado, ErroFrameDTO):
             self._erros.append(processado)
-
-    def _merge_escola(self, novo: EscolaFrameDTO) -> None:
-        if self._escola is None:
-            self._escola = novo
-            return
-
-        self._escola = replace(
-            self._escola,
-            nome_escola=novo.nome_escola or self._escola.nome_escola,
-            uf_escola=novo.uf_escola or self._escola.uf_escola,
-            dependencia_escola=(
-                novo.dependencia_escola
-                or self._escola.dependencia_escola
-            ),
-            estudantes_escola=(
-                novo.estudantes_escola
-                or self._escola.estudantes_escola
-            ),
-            medicoes_escola=(
-                novo.medicoes_escola
-                or self._escola.medicoes_escola
-            ),
-            max_95_down=(
-                novo.max_95_down
-                or self._escola.max_95_down
-            ),
-            vel_adequada=(
-                novo.vel_adequada
-                or self._escola.vel_adequada
-            ),
-        )
 
     @property
     def completo(self) -> bool:

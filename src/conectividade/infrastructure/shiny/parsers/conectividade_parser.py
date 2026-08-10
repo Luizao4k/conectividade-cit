@@ -37,7 +37,13 @@ class ConectividadeFrameParser:
     """Reconhece e converte o frame com as métricas de qualidade da conexão."""
 
     def reconhece(self, valores: dict[str, object]) -> bool:
-        return _CHAVES_ESPERADAS.issubset(valores.keys())
+        # Os campos de conectividade nem sempre chegam num único frame — o
+        # Shiny pode enviar "plano_estimado"/"status_medidor" separado do
+        # restante (nro_medicoes, jitter, latencia, ...). Por isso o
+        # reconhecimento é por interseção (igual Escola/Provedores), não por
+        # subconjunto completo — senão o parser nunca reconhece nada e os
+        # dados de conectividade são descartados silenciosamente.
+        return bool(_CHAVES_ESPERADAS.intersection(valores.keys()))
 
     def parse(self, valores: dict[str, object]) -> ConectividadeFrameDTO:
         return ConectividadeFrameDTO(

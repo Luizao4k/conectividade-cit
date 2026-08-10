@@ -1,35 +1,16 @@
 """
-Consulta escolas em lote utilizando o portal Conectividade na Educação.
+Teste de consulta em lote utilizando Shiny.$values.
 
-Fluxo:
+Objetivo:
+    Validar consultas sequenciais de INEPs sem reutilizar os dados
+    da consulta anterior.
 
-    CSV de INEPs
-        ↓
-    Chrome / Playwright
-        ↓
-    Shiny
-        ↓
-    Consulta sequencial
-        ↓
-    Validação / estabilização
-        ↓
-    CSV de resultados
-
-Características:
-
-- Processamento sequencial.
-- Um único navegador durante todo o lote.
-- Leitura dos INEPs através de CSV.
-- Salvamento após cada INEP.
-- Possibilidade de continuar um lote interrompido.
-- Não reutiliza dados da consulta anterior.
+Este arquivo é um teste de integração/debug.
 """
 
 from __future__ import annotations
 
-import csv
 import time
-from pathlib import Path
 from typing import Any
 
 from conectividade.infrastructure.browser.browser import Browser
@@ -39,46 +20,38 @@ from conectividade.infrastructure.browser.browser import Browser
 # CONFIGURAÇÃO
 # ============================================================
 
+INEPS = [
+    "15588831",
+    "15588610",
+    "15588599",
+    "15588378",
+    "15587916",
+    "15587894",
+    "15587886",
+    "15587878",
+    "15587711",
+    "15587282"
+]
+
 URL_PORTAL = (
     "https://conectividadenaeducacao.nic.br/#sua-escola"
 )
 
-BASE_DIR = Path(__file__).resolve().parent
-
-DIRETORIO_DADOS = BASE_DIR / "dados"
-
-ARQUIVO_INEPS = (
-    DIRETORIO_DADOS / "ineps.csv"
-)
-
-DIRETORIO_RESULTADOS = (
-    DIRETORIO_DADOS / "resultados"
-)
-
-ARQUIVO_RESULTADOS = (
-    DIRETORIO_RESULTADOS / "resultado_lote.csv"
-)
-
-
-# Tempo máximo aguardando conexão do Shiny.
 TIMEOUT_SHINY = 90.0
 
-
-# Tempo máximo aguardando resposta de uma escola.
+# Tempo máximo aguardando a resposta de uma escola.
 TIMEOUT_RESPOSTA = 60.0
 
-
-# Intervalo entre verificações.
+# Intervalo entre as verificações.
 INTERVALO = 0.5
 
-
-# Tempo que os dados precisam permanecer
-# iguais antes de serem considerados estáveis.
+# Tempo que os dados precisam permanecer iguais
+# antes de serem considerados estabilizados.
 TEMPO_ESTABILIZACAO = 5.0
 
 
 # ============================================================
-# CAMPOS ESPERADOS
+# CAMPOS
 # ============================================================
 
 CAMPOS_ESPERADOS = (
@@ -127,8 +100,8 @@ def ler_values(page) -> dict[str, Any]:
     """
     Lê Shiny.shinyapp.$values.
 
-    Durante uma reação do Shiny o contexto JavaScript
-    pode ser destruído temporariamente.
+    Durante uma reação do Shiny o contexto JavaScript pode
+    ser destruído temporariamente. Nesse caso retorna {}.
     """
 
     try:
@@ -255,7 +228,7 @@ def aguardar_shiny(page) -> None:
         )
 
     raise TimeoutError(
-        "Shiny não conectou em "
+        f"Shiny não conectou em "
         f"{TIMEOUT_SHINY:.0f} segundos."
     )
 
@@ -357,15 +330,31 @@ def obter_assinatura_escola(
     Cria uma assinatura somente com os dados relevantes
     da escola.
 
-    A assinatura permite descobrir se os dados retornados
-    pelo portal realmente mudaram.
+    A assinatura é utilizada para descobrir se os dados
+    retornados pelo portal realmente mudaram.
     """
 
     return tuple(
         normalizar_valor(
             valores.get(campo)
         )
-        for campo in CAMPOS_ESPERADOS
+        for campo in (
+            "nome_escola",
+            "uf_escola",
+            "dependencia_escola",
+            "estudantes_escola",
+            "estudantes_escola_maior_turno",
+            "vel_adequada",
+            "status_medidor",
+            "vel_download",
+            "vel_upload",
+            "latencia",
+            "jitter",
+            "perda_pacote",
+            "nro_medicoes",
+            "medicoes_escola",
+            "max_95_down",
+        )
     )
 
 
@@ -435,12 +424,14 @@ def aguardar_resposta(
 
     Estratégia:
 
-    1. Confirma o INEP no Shiny.
-    2. Aguarda o processamento.
-    3. Detecta INEP inexistente.
-    4. Aguarda os dados anteriores serem substituídos.
-    5. Detecta nova assinatura.
-    6. Aguarda estabilidade.
+    1. Confirma que o novo INEP foi enviado.
+    2. Aguarda o portal começar a processar.
+    3. Verifica se o INEP não existe.
+    4. Aguarda os dados anteriores desaparecerem
+       ou serem substituídos.
+    5. Detecta uma nova assinatura.
+    6. Aguarda os dados permanecerem estáveis por
+       TEMPO_ESTABILIZACAO segundos.
     7. Retorna somente os dados estabilizados.
     """
 
@@ -450,14 +441,16 @@ def aguardar_resposta(
 
     inicio = time.monotonic()
 
-    nova_assinatura = None
+    nova_assinatura: tuple[Any, ...] | None = None
 
-    valores_finais = None
+    valores_finais: dict[str, Any] | None = None
 
-    inicio_estabilidade = None
+    inicio_estabilidade: float | None = None
 
     mostrou_processamento = False
+
     mostrou_limpeza = False
+
     mostrou_novos_dados = False
 
     while (
@@ -465,9 +458,9 @@ def aguardar_resposta(
         < TIMEOUT_RESPOSTA
     ):
 
-        # ----------------------------------------------------
-        # 1. INEP não encontrado
-        # ----------------------------------------------------
+        # ====================================================
+        # 1. Verifica INEP inexistente
+        # ====================================================
 
         if inep_nao_encontrado(page):
 
@@ -478,9 +471,9 @@ def aguardar_resposta(
 
             return "nao_encontrado", {}
 
-        # ----------------------------------------------------
-        # 2. Confirma INEP no Shiny
-        # ----------------------------------------------------
+        # ====================================================
+        # 2. Confirma INEP atual no Shiny
+        # ====================================================
 
         input_atual = ler_input_shiny(page)
 
@@ -492,9 +485,9 @@ def aguardar_resposta(
 
             continue
 
-        # ----------------------------------------------------
-        # 3. Processamento
-        # ----------------------------------------------------
+        # ====================================================
+        # 3. Mensagem de processamento
+        # ====================================================
 
         if not mostrou_processamento:
 
@@ -505,9 +498,9 @@ def aguardar_resposta(
 
             mostrou_processamento = True
 
-        # ----------------------------------------------------
-        # 4. Ler valores
-        # ----------------------------------------------------
+        # ====================================================
+        # 4. Lê os valores atuais
+        # ====================================================
 
         valores = ler_values(page)
 
@@ -525,9 +518,9 @@ def aguardar_resposta(
             )
         )
 
-        # ----------------------------------------------------
-        # 5. Dados ainda não válidos
-        # ----------------------------------------------------
+        # ====================================================
+        # 5. Ainda não existem dados de escola
+        # ====================================================
 
         if not dados_validos(valores):
 
@@ -546,9 +539,9 @@ def aguardar_resposta(
 
             continue
 
-        # ----------------------------------------------------
+        # ====================================================
         # 6. PRIMEIRA CONSULTA
-        # ----------------------------------------------------
+        # ====================================================
 
         if assinatura_anterior is None:
 
@@ -566,7 +559,9 @@ def aguardar_resposta(
                 or assinatura_atual != nova_assinatura
             ):
 
-                nova_assinatura = assinatura_atual
+                nova_assinatura = (
+                    assinatura_atual
+                )
 
                 valores_finais = valores
 
@@ -581,10 +576,7 @@ def aguardar_resposta(
 
             else:
 
-                assert (
-                    inicio_estabilidade
-                    is not None
-                )
+                assert inicio_estabilidade is not None
 
                 tempo_estavel = (
                     time.monotonic()
@@ -603,10 +595,7 @@ def aguardar_resposta(
                         "Shiny.$values."
                     )
 
-                    assert (
-                        valores_finais
-                        is not None
-                    )
+                    assert valores_finais is not None
 
                     return (
                         "sucesso",
@@ -619,9 +608,13 @@ def aguardar_resposta(
 
             continue
 
-        # ----------------------------------------------------
+        # ====================================================
         # 7. CONSULTAS SEGUINTES
-        # ----------------------------------------------------
+        # ====================================================
+
+        # Enquanto os dados forem exatamente iguais aos
+        # da consulta anterior, ainda não temos uma nova
+        # resposta.
 
         if (
             assinatura_atual
@@ -643,16 +636,18 @@ def aguardar_resposta(
 
             continue
 
-        # ----------------------------------------------------
-        # 8. NOVOS DADOS
-        # ----------------------------------------------------
+        # ====================================================
+        # 8. NOVOS DADOS DETECTADOS
+        # ====================================================
 
         if (
             nova_assinatura is None
             or assinatura_atual != nova_assinatura
         ):
 
-            nova_assinatura = assinatura_atual
+            nova_assinatura = (
+                assinatura_atual
+            )
 
             valores_finais = valores
 
@@ -677,8 +672,7 @@ def aguardar_resposta(
 
                 print(
                     "[AGUARDANDO] "
-                    "Portal ainda atualizando "
-                    "os dados..."
+                    "Portal ainda atualizando os dados..."
                 )
 
             page.wait_for_timeout(
@@ -687,19 +681,13 @@ def aguardar_resposta(
 
             continue
 
-        # ----------------------------------------------------
-        # 9. DADOS ESTÁVEIS
-        # ----------------------------------------------------
+        # ====================================================
+        # 9. NOVOS DADOS PERMANECEM IGUAIS
+        # ====================================================
 
-        assert (
-            inicio_estabilidade
-            is not None
-        )
+        assert inicio_estabilidade is not None
 
-        assert (
-            valores_finais
-            is not None
-        )
+        assert valores_finais is not None
 
         tempo_estavel = (
             time.monotonic()
@@ -727,9 +715,9 @@ def aguardar_resposta(
             int(INTERVALO * 1000)
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # TIMEOUT
-    # --------------------------------------------------------
+    # ========================================================
 
     print(
         "[TIMEOUT] "
@@ -760,221 +748,10 @@ def extrair_dados(
 
 
 # ============================================================
-# CSV - LEITURA DOS INEPS
-# ============================================================
-
-def carregar_ineps(
-    arquivo: Path,
-) -> list[str]:
-    """
-    Carrega os INEPs de um CSV.
-
-    O arquivo deve possuir uma coluna chamada:
-
-        inep
-    """
-
-    if not arquivo.exists():
-
-        raise FileNotFoundError(
-            f"Arquivo de INEPs não encontrado: "
-            f"{arquivo}"
-        )
-
-    ineps = []
-
-    with arquivo.open(
-        "r",
-        encoding="utf-8-sig",
-        newline="",
-    ) as arquivo_csv:
-
-        leitor = csv.DictReader(
-            arquivo_csv
-        )
-
-        if not leitor.fieldnames:
-
-            raise ValueError(
-                "CSV não possui cabeçalho."
-            )
-
-        if "inep" not in leitor.fieldnames:
-
-            raise ValueError(
-                "O CSV precisa possuir uma coluna "
-                "chamada 'inep'."
-            )
-
-        for linha in leitor:
-
-            inep = str(
-                linha.get("inep", "")
-            ).strip()
-
-            if not inep:
-                continue
-
-            # Remove possíveis casas decimais
-            # caso o CSV tenha sido gerado pelo Excel.
-            if inep.endswith(".0"):
-                inep = inep[:-2]
-
-            if not inep.isdigit():
-
-                print(
-                    f"[AVISO] INEP inválido ignorado: "
-                    f"{inep}"
-                )
-
-                continue
-
-            ineps.append(inep)
-
-    if not ineps:
-
-        raise ValueError(
-            "Nenhum INEP válido encontrado no CSV."
-        )
-
-    return ineps
-
-
-# ============================================================
-# CSV - LEITURA DO CHECKPOINT
-# ============================================================
-
-def carregar_processados(
-    arquivo: Path,
-) -> set[str]:
-    """
-    Carrega os INEPs já salvos no arquivo de resultados.
-
-    Isso permite continuar o lote após uma interrupção.
-    """
-
-    if not arquivo.exists():
-        return set()
-
-    processados = set()
-
-    with arquivo.open(
-        "r",
-        encoding="utf-8-sig",
-        newline="",
-    ) as arquivo_csv:
-
-        leitor = csv.DictReader(
-            arquivo_csv
-        )
-
-        for linha in leitor:
-
-            inep = str(
-                linha.get("inep", "")
-            ).strip()
-
-            if inep:
-                processados.add(inep)
-
-    return processados
-
-
-# ============================================================
-# CSV - SALVAMENTO
-# ============================================================
-
-CAMPOS_RESULTADO = (
-    "inep",
-    "status",
-    "tempo",
-
-    "nome_escola",
-    "uf_escola",
-    "dependencia_escola",
-    "estudantes_escola",
-    "estudantes_escola_maior_turno",
-    "vel_adequada",
-    "status_medidor",
-    "vel_download",
-    "vel_upload",
-    "latencia",
-    "jitter",
-    "perda_pacote",
-    "nro_medicoes",
-    "medicoes_escola",
-    "max_95_down",
-)
-
-
-def salvar_resultado(
-    arquivo: Path,
-    inep: str,
-    status: str,
-    dados: dict[str, Any],
-    tempo: float,
-) -> None:
-    """
-    Salva imediatamente o resultado de uma consulta.
-
-    O arquivo é aberto em modo append para que cada resultado
-    seja persistido individualmente.
-    """
-
-    arquivo.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    arquivo_existe = arquivo.exists()
-
-    registro = {
-        "inep": inep,
-        "status": status,
-        "tempo": f"{tempo:.2f}",
-    }
-
-    for campo in CAMPOS_ESPERADOS:
-
-        valor = dados.get(campo)
-
-        if valor is None:
-            valor = ""
-
-        registro[campo] = valor
-
-    with arquivo.open(
-        "a",
-        encoding="utf-8-sig",
-        newline="",
-    ) as arquivo_csv:
-
-        escritor = csv.DictWriter(
-            arquivo_csv,
-            fieldnames=CAMPOS_RESULTADO,
-            extrasaction="ignore",
-        )
-
-        if not arquivo_existe:
-
-            escritor.writeheader()
-
-        escritor.writerow(
-            registro
-        )
-
-        # Garante que o resultado seja gravado
-        # imediatamente no disco.
-        arquivo_csv.flush()
-
-
-# ============================================================
 # SAÍDA
 # ============================================================
 
 def imprimir_resultado(
-    indice: int,
-    total: int,
     inep: str,
     status: str,
     dados: dict[str, Any],
@@ -984,10 +761,8 @@ def imprimir_resultado(
     Exibe o resultado de uma consulta.
     """
 
-    print("\n" + "=" * 80)
-
     print(
-        f"CONSULTA {indice}/{total}"
+        "\n" + "=" * 80
     )
 
     print(
@@ -1059,7 +834,9 @@ def imprimir_resultado(
         f"Tempo: {tempo:.2f}s"
     )
 
-    print("=" * 80)
+    print(
+        "=" * 80
+    )
 
 
 # ============================================================
@@ -1070,7 +847,11 @@ def consultar(
     page,
     inep: str,
     assinatura_anterior: tuple[Any, ...] | None,
-) -> tuple[str, dict[str, Any], float]:
+) -> tuple[
+    str,
+    dict[str, Any],
+    float,
+]:
     """
     Executa uma consulta individual.
     """
@@ -1110,85 +891,20 @@ def consultar(
 
 def main() -> None:
     """
-    Executa o processamento completo do lote.
+    Executa o teste de consulta em lote.
     """
 
     print(
-        "=== CONSULTA DE INEPS EM LOTE ==="
+        "=== TESTE DE CONSULTA EM LOTE ==="
     )
-
-    # --------------------------------------------------------
-    # CARREGAR INEPS
-    # --------------------------------------------------------
-
-    ineps = carregar_ineps(
-        ARQUIVO_INEPS
-    )
-
-    total = len(ineps)
 
     print(
-        f"Total de INEPs no CSV: {total}"
+        f"Quantidade de INEPs: {len(INEPS)}"
     )
-
-    # --------------------------------------------------------
-    # CARREGAR CHECKPOINT
-    # --------------------------------------------------------
-
-    processados = carregar_processados(
-        ARQUIVO_RESULTADOS
-    )
-
-    if processados:
-
-        print(
-            f"INEPs já processados: "
-            f"{len(processados)}"
-        )
-
-        restantes = [
-            inep
-            for inep in ineps
-            if inep not in processados
-        ]
-
-        print(
-            f"INEPs restantes: "
-            f"{len(restantes)}"
-        )
-
-    else:
-
-        restantes = ineps
-
-        print(
-            "Nenhum resultado anterior encontrado."
-        )
-
-    if not restantes:
-
-        print(
-            "\n[OK] Todos os INEPs já foram processados."
-        )
-
-        print(
-            f"Resultados: "
-            f"{ARQUIVO_RESULTADOS}"
-        )
-
-        return
-
-    # --------------------------------------------------------
-    # RESULTADOS DA EXECUÇÃO ATUAL
-    # --------------------------------------------------------
 
     resultados = []
 
     assinatura_anterior = None
-
-    # --------------------------------------------------------
-    # ABRIR BROWSER
-    # --------------------------------------------------------
 
     with Browser(
         url_portal=URL_PORTAL,
@@ -1214,9 +930,9 @@ def main() -> None:
             page.url,
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # ABRIR PORTAL
-        # ----------------------------------------------------
+        # ====================================================
 
         if (
             "conectividadenaeducacao.nic.br"
@@ -1233,18 +949,18 @@ def main() -> None:
                 timeout=120_000,
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # AGUARDAR SHINY
-        # ----------------------------------------------------
+        # ====================================================
 
         aguardar_shiny(page)
 
-        # ----------------------------------------------------
-        # PROCESSAMENTO
-        # ----------------------------------------------------
+        # ====================================================
+        # LOTE
+        # ====================================================
 
         for indice, inep in enumerate(
-            restantes,
+            INEPS,
             start=1,
         ):
 
@@ -1255,8 +971,8 @@ def main() -> None:
             )
 
             print(
-                f"PROCESSAMENTO "
-                f"{indice}/{len(restantes)}"
+                f"CONSULTA "
+                f"{indice}/{len(INEPS)}"
             )
 
             print(
@@ -1267,63 +983,22 @@ def main() -> None:
                 "#" * 80
             )
 
-            try:
-
-                status, dados, tempo = consultar(
-                    page,
-                    inep,
-                    assinatura_anterior,
-                )
-
-            except Exception as exc:
-
-                status = "erro"
-
-                dados = {}
-
-                tempo = 0.0
-
-                print(
-                    f"[ERRO] Falha no INEP "
-                    f"{inep}: {exc}"
-                )
-
-            # ------------------------------------------------
-            # MOSTRAR RESULTADO
-            # ------------------------------------------------
+            status, dados, tempo = consultar(
+                page,
+                inep,
+                assinatura_anterior,
+            )
 
             imprimir_resultado(
-                indice,
-                len(restantes),
                 inep,
                 status,
                 dados,
                 tempo,
             )
 
-            # ------------------------------------------------
-            # SALVAR IMEDIATAMENTE
-            # ------------------------------------------------
-
-            salvar_resultado(
-                ARQUIVO_RESULTADOS,
-                inep,
-                status,
-                dados,
-                tempo,
-            )
-
-            print(
-                "[SALVO] Resultado gravado em:"
-            )
-
-            print(
-                f"        {ARQUIVO_RESULTADOS}"
-            )
-
-            # ------------------------------------------------
-            # ATUALIZAR ASSINATURA
-            # ------------------------------------------------
+            # =================================================
+            # ATUALIZA ASSINATURA
+            # =================================================
 
             if status == "sucesso":
 
@@ -1333,10 +1008,6 @@ def main() -> None:
                     )
                 )
 
-            # ------------------------------------------------
-            # REGISTRAR EXECUÇÃO
-            # ------------------------------------------------
-
             resultados.append(
                 {
                     "inep": inep,
@@ -1345,83 +1016,81 @@ def main() -> None:
                 }
             )
 
-    # ========================================================
-    # RESUMO
-    # ========================================================
+        # ====================================================
+        # RESUMO
+        # ====================================================
 
-    total_processado = len(
-        resultados
-    )
+        total = len(
+            resultados
+        )
 
-    sucessos = sum(
-        resultado["status"]
-        == "sucesso"
-        for resultado in resultados
-    )
+        sucessos = sum(
+            resultado["status"]
+            == "sucesso"
+            for resultado in resultados
+        )
 
-    nao_encontrados = sum(
-        resultado["status"]
-        == "nao_encontrado"
-        for resultado in resultados
-    )
+        nao_encontrados = sum(
+            resultado["status"]
+            == "nao_encontrado"
+            for resultado in resultados
+        )
 
-    timeouts = sum(
-        resultado["status"]
-        == "timeout"
-        for resultado in resultados
-    )
+        timeouts = sum(
+            resultado["status"]
+            == "timeout"
+            for resultado in resultados
+        )
 
-    erros = sum(
-        resultado["status"]
-        == "erro"
-        for resultado in resultados
-    )
+        print("\n")
 
-    print("\n")
+        print(
+            "=" * 80
+        )
 
-    print(
-        "=" * 80
-    )
+        print(
+            "RESUMO DO LOTE"
+        )
 
-    print(
-        "RESUMO DA EXECUÇÃO"
-    )
+        print(
+            "=" * 80
+        )
 
-    print(
-        "=" * 80
-    )
+        print(
+            f"Total:           {total}"
+        )
 
-    print(
-        f"Processados:      {total_processado}"
-    )
+        print(
+            f"Sucesso:         {sucessos}"
+        )
 
-    print(
-        f"Sucesso:          {sucessos}"
-    )
+        print(
+            f"Não encontrado:  {nao_encontrados}"
+        )
 
-    print(
-        f"Não encontrado:   {nao_encontrados}"
-    )
+        print(
+            f"Timeout:         {timeouts}"
+        )
 
-    print(
-        f"Timeout:          {timeouts}"
-    )
+        print(
+            "=" * 80
+        )
 
-    print(
-        f"Erros:            {erros}"
-    )
+        print(
+            "\nRESULTADOS:"
+        )
 
-    print(
-        "=" * 80
-    )
+        for resultado in resultados:
 
-    print(
-        "\nResultados salvos em:"
-    )
+            print(
+                f"  {resultado['inep']} "
+                f"-> {resultado['status']}"
+            )
 
-    print(
-        ARQUIVO_RESULTADOS
-    )
+        input(
+            "\nPressione ENTER para fechar "
+            "o navegador..."
+        )
 
 
 if __name__ == "__main__":

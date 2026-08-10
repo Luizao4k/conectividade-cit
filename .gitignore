@@ -1,37 +1,46 @@
-# Ambientes virtuais Python
+# --- Ambientes virtuais ---
 .venv/
 venv/
-ENV/
 env/
+ENV/
 
-# Arquivos compilados/otimizados/DLL
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# --- Ferramentas de tipo/lint/teste ---
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Playwright ---
+playwright-report/
+perfil_chrome/
+test-results/
+*.trace.zip
 
 
-
-# Configurações da IDE/editor
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
-
-# Variáveis de ambiente locais
+# --- Variáveis de ambiente / segredos ---
 .env
 .env.*
+!.env.example
 
-# Perfil do Chrome local
-perfil_chrome/
-
-# Diversos
-*.log
-*.pot
-*.mo
+# --- Editores / SO ---
+.vscode/
+.idea/
 .DS_Store
+Thumbs.db
 
-# Cache de egg do Python
-.eggs/
-
-# MyPy
-.mypy_cache/
+# --- Logs ---
+*.log

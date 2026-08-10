@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 from typing import TypeGuard
 
-from conectividade.infrastructure.shiny.frame_bruto import FrameBruto
+from conectividade.infrastructure.shiny.frame_bruto import FrameBruto, FrameFechamento
 
 
 def decodificar_envelope(texto_recebido: str) -> list[str]:
@@ -69,6 +69,29 @@ def parse_mensagem_bruta(mensagem: str) -> FrameBruto | None:
         erros=_dict_de_str_ou_vazio(payload.get("errors", {})),
         recalculando=_dict_de_str_ou_none(payload.get("recalculating")),
     )
+
+
+def parse_mensagem_fechamento(mensagem: str) -> FrameFechamento | None:
+    """
+    Converte uma mensagem individual de fechamento (ex.:
+    `"34#0|c|{\"code\":4503,\"reason\":\"...\"}"`) em um `FrameFechamento`.
+    Retorna `None` se a mensagem não for desse tipo (`|c|`) ou se o corpo
+    não tiver o formato esperado.
+    """
+    _cabecalho, separador, corpo = mensagem.partition("|c|")
+    if not separador:
+        return None
+
+    payload = _json_ou_none(corpo)
+    if not isinstance(payload, dict):
+        return None
+
+    codigo = payload.get("code")
+    motivo = payload.get("reason")
+    if not isinstance(codigo, int) or not isinstance(motivo, str):
+        return None
+
+    return FrameFechamento(code=codigo, reason=motivo)
 
 
 def _json_ou_none(texto: str) -> object:

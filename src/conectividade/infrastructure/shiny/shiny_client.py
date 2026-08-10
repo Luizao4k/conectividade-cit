@@ -7,11 +7,15 @@ from dataclasses import replace as dataclasses_replace
 from typing import TYPE_CHECKING
 
 from conectividade.domain.consulta_escola import ConsultaEscola
-from conectividade.domain.exceptions import RespostaIncompletaError
+from conectividade.domain.exceptions import (
+    AplicacaoShinyEncerradaError,
+    RespostaIncompletaError,
+)
 from conectividade.infrastructure.shiny.aggregator import AgregadorDeConsulta
 from conectividade.infrastructure.shiny.frame_parser import (
     decodificar_envelope,
     parse_mensagem_bruta,
+    parse_mensagem_fechamento,
 )
 from conectividade.infrastructure.shiny.frame_router import RoteadorDeFrames
 from conectividade.infrastructure.websocket.websocket_listener import (
@@ -175,9 +179,25 @@ class ShinyClient:
         texto: str,
         agregador: AgregadorDeConsulta,
     ) -> None:
+        print(
+            "[FRAME BRUTO]",
+            len(texto),
+            repr(texto[:200]),
+            flush=True,
+        )
 
         try:
             for mensagem in decodificar_envelope(texto):
+
+                fechamento = parse_mensagem_fechamento(mensagem)
+                if fechamento is not None:
+                    if self._debug:
+                        print(
+                            "[FECHAMENTO]",
+                            f"code={fechamento.code} reason={fechamento.reason!r}",
+                        )
+                    agregador.registrar_fechamento(fechamento)
+                    continue
 
                 frame = parse_mensagem_bruta(mensagem)
                 if frame is None:
@@ -235,6 +255,14 @@ class ShinyClient:
         limite = time.monotonic() + self._timeout
 
         while time.monotonic() < limite:
+
+            if agregador.fechamento_anormal is not None:
+                fechamento = agregador.fechamento_anormal
+                raise AplicacaoShinyEncerradaError(
+                    f"A aplicação Shiny do portal encerrou durante a "
+                    f"consulta ao INEP {agregador.inep!r} "
+                    f"(code={fechamento.code}, reason={fechamento.reason!r})."
+                )
 
             if agregador.completo:
                 return

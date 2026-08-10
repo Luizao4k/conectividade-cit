@@ -8,3 +8,8 @@ class EscolaNaoEncontradaError(ConsultaEscolaError):
 
 class RespostaIncompletaError(ConsultaEscolaError):
     """Levantada quando o portal não envia os frames esperados dentro do timeout."""
+
+
+class AplicacaoShinyEncerradaError(ConsultaEscolaError):
+    """Levantada quando o servidor encerra a aplicação Shiny no meio da consulta
+    (ex.: crash da aplicação, código de fechamento diferente de 1000)."""
