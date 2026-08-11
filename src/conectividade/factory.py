@@ -9,9 +9,10 @@ Esta fábrica recebe uma `Page` já pronta (navegador aberto, proxy
 configurado, portal carregado) em vez de abrir o navegador ela mesma.
 Isso é proposital: quem abre e fecha o navegador (`Browser`, em
 `infrastructure/browser/browser.py`) é o composition root da aplicação
-(ex.: `main.py`), porque hoje esse processo inclui um passo manual
-(configurar o proxy corporativo) que não faz sentido morar dentro de
-uma fábrica de serviço. Veja `main.py` para o fluxo completo.
+cliente desta biblioteca, porque esse processo costuma incluir um passo
+manual (ex.: configurar um proxy corporativo) que não faz sentido morar
+dentro de uma fábrica de serviço. Veja `docs/CONSULTA_INDIVIDUAL.md`
+para um exemplo completo de uso.
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ def criar_consulta_service(
     Args:
         page: Página do Playwright já com o portal carregado (ex.:
             `browser.page`, após `Browser` ter sido aberto e o proxy
-            configurado — ver `main.py`).
+            configurado — ver `docs/CONSULTA_INDIVIDUAL.md`).
         timeout_segundos: Tempo máximo de espera pelos frames de resposta
             de cada consulta.
         roteador: Roteador de frames customizado (opcional; útil em

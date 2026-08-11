@@ -18,8 +18,6 @@ T_co = TypeVar("T_co", covariant=True)
 class ParserDeFrame(Protocol[T_co]):
     def reconhece(self, valores: dict[str, object]) -> bool:
         """Retorna True se este parser sabe processar este conjunto de chaves."""
-        print(valores.keys())
-        return True
         ...
 
     def parse(self, valores: dict[str, object]) -> T_co:

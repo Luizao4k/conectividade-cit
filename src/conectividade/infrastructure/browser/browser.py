@@ -70,13 +70,20 @@ class Browser:
         return self._context
 
     def __enter__(self) -> Browser:
-        """Inicializa o navegador."""
+        """
+        Inicializa o navegador e devolve a instância pronta para uso.
+
+        Não navega até o portal automaticamente: quem decide quando (e se)
+        navegar é o chamador — ver `abrir_portal()` — porque em alguns
+        fluxos operacionais (ex.: configuração manual de proxy corporativo
+        antes de qualquer requisição) a navegação precisa esperar um passo
+        manual do operador.
+        """
 
         self._iniciar_playwright()
         self._abrir_contexto()
         self._obter_pagina()
         self._configurar_pagina()
-        #self._abrir_portal()
 
         return self
 
@@ -129,12 +136,16 @@ class Browser:
             self._timeout_ms,
         )
 
-    def _abrir_portal(self) -> None:
+    def abrir_portal(self) -> None:
         """
-        Navega até o portal.
+        Navega até o portal configurado.
 
-        Caso o navegador já esteja na URL correta,
-        evita um novo carregamento.
+        Caso o navegador já esteja na URL correta, evita um novo
+        carregamento. Útil para consumidores da biblioteca que não
+        precisam de nenhum passo manual (ex.: proxy) antes de navegar —
+        para fluxos operacionais com esse passo manual, veja
+        `infrastructure/browser/browser.py` usado a partir de `lote/cli.py`,
+        que controla a navegação explicitamente.
         """
 
         if self.page.url != self._url_portal:
@@ -145,11 +156,16 @@ class Browser:
 
         self.page.wait_for_load_state("networkidle")
 
-        self._aguardar_shiny()
+        self._aguardar_runtime_shiny_carregado()
 
-    def _aguardar_shiny(self) -> None:
+    def _aguardar_runtime_shiny_carregado(self) -> None:
         """
-        Aguarda a inicialização do runtime Shiny.
+        Aguarda o script do runtime Shiny estar carregado na página.
+
+        Isto verifica apenas que `window.Shiny` existe — não que o
+        WebSocket já está conectado. Para essa garantia mais forte
+        (necessária antes de enviar um INEP), veja
+        `lote/infrastructure/shiny_polling/aguardador_conexao.py`.
         """
 
         self.page.wait_for_function(
@@ -162,10 +178,10 @@ class Browser:
         return self.context.new_page()
 
     def recarregar(self) -> None:
-        """Recarrega a página atual."""
+        """Recarrega a página atual e aguarda o runtime Shiny carregar."""
 
         self.page.reload(
             wait_until="domcontentloaded",
         )
 
-        self._aguardar_shiny()
+        self._aguardar_runtime_shiny_carregado()

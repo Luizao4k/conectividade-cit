@@ -4,14 +4,16 @@ Módulo de consulta ao portal Conectividade na Educação.
 Uso:
 
     from conectividade import criar_consulta_service
-    from conectividade.infrastructure.browser.browser import Browser
+    from conectividade.infrastructure.browser import Browser
 
     with Browser(url_portal=URL_PORTAL, headless=False) as browser:
-        # ... configurar proxy / navegar até o portal (ver main.py) ...
+        browser.abrir_portal()  # ou navegue manualmente, se houver um passo de proxy
         consulta_service = criar_consulta_service(browser.page)
 
         resultado = consulta_service.consultar("15001156")
         resultados = consulta_service.consultar_lote(["15001156", "11000222"])
+
+Veja `docs/CONSULTA_INDIVIDUAL.md` para o guia completo.
 """
 from __future__ import annotations
 
