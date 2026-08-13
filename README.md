@@ -69,12 +69,7 @@ dos arquivos e o algoritmo de estabilização.
 - [`docs/LOTE_OPERACIONAL.md`](docs/LOTE_OPERACIONAL.md) — o CLI de
   processamento em lote (polling + CSV).
 
-## Desenvolvimento
 
-```bash
-pip install -e ".[dev]"
-mypy src
-```
 
 ## Status
 

@@ -54,7 +54,7 @@ inep
 ### Saída / checkpoint — `dados/resultados/resultado_lote.csv`
 
 ```csv
-inep,status,tempo,nome_escola,uf_escola,dependencia_escola,estudantes_escola,estudantes_escola_maior_turno,vel_adequada,status_medidor,vel_download,vel_upload,latencia,jitter,perda_pacote,nro_medicoes,medicoes_escola,max_95_down
+inep,status,tempo,nome_escola,uf_escola,dependencia_escola,estudantes_escola,estudantes_escola_maior_turno,vel_adequada,status_medidor,vel_download,vel_upload,latencia,jitter,perda_pacote,nro_medicoes,medicoes_escola,max_95_down,provedoresSIMET_regiao,provedor_do_estabelecimento
 12345678,sucesso,34.12,Escola Exemplo,Município: X - Y,Gestão: Municipal,Número de estudantes: 120,...,...
 ```
 
@@ -73,6 +73,48 @@ inep,status,tempo,nome_escola,uf_escola,dependencia_escola,estudantes_escola,est
   esses campos em tipos nativos (ex.: `município` e `uf` como colunas
   separadas), isso deve ser feito como uma etapa de pós-processamento
   do CSV, não mudando este contrato.
+- **Exceção**: `provedoresSIMET_regiao` e `provedor_do_estabelecimento`
+  passam por uma limpeza leve do HTML do portal — o rótulo estático
+  ("Provedor(es) da Escola", "Provedor(es) na região") é descartado e
+  só os nomes dos provedores ficam no CSV, sem tags HTML. Nem toda
+  escola tem provedor cadastrado; nesse caso a coluna fica vazia (não é
+  um erro).
+
+### Por que o provedor às vezes fica vazio mesmo em escolas que talvez tenham provedor
+
+O portal não limpa os campos de provedor quando a escola não tem
+nenhum cadastrado — o Shiny simplesmente não recalcula aquele valor
+reativo, então ele permanece na tela com o valor da **consulta
+anterior** dentro da mesma sessão de navegador. Sem tratamento, isso
+faria uma escola sem provedor aparecer no CSV com o provedor da escola
+consultada logo antes dela — um dado errado, não apenas incompleto.
+
+Para evitar isso, `DadosEscolaLote.descartando_provedores_nao_atualizados`
+(aplicado em `ProcessarLoteUseCase`, só no momento de salvar/exibir o
+resultado — nunca no valor usado internamente para detectar
+estabilização) compara o provedor da consulta atual com o da consulta
+anterior: se forem **idênticos**, assume que não foi realmente
+atualizado para esta escola e grava vazio em vez do valor repetido.
+
+**Escopo**: esse descarte se aplica só a `provedor_do_estabelecimento`
+(o provedor específico da escola). `provedoresSIMET_regiao` (a lista de
+provedores da região) **nunca** é descartado automaticamente, porque é
+um dado por região — duas escolas vizinhas no mesmo lote legitimamente
+têm a mesma lista, e descartar por coincidência apagaria dado real com
+frequência. Se no futuro for necessário o mesmo tratamento para
+`provedoresSIMET_regiao`, ajuste `_CAMPOS_PROVEDOR_SUJEITOS_A_DESCARTE`
+em `lote/aplicacao/processar_lote_use_case.py`.
+
+> **Nota de migração**: se você já tinha um `resultado_lote.csv` gerado
+> antes das colunas `provedoresSIMET_regiao`/`provedor_do_estabelecimento`
+> existirem, o cabeçalho desse arquivo **não** será reescrito
+> automaticamente (o código só escreve cabeçalho para arquivo novo). Ou
+> seja: linhas gravadas a partir de agora terão 2 colunas a mais do que
+> o cabeçalho já escrito, desalinhando o CSV. Antes de rodar o lote de
+> novo sobre um arquivo antigo, renomeie-o (ex.:
+> `resultado_lote.csv` → `resultado_lote.antigo.csv`) para começar um
+> arquivo novo com o cabeçalho atualizado, ou adicione manualmente as
+> duas colunas vazias ao cabeçalho existente.
 
 ### Status possíveis
 

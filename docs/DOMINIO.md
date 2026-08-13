@@ -83,6 +83,10 @@ Expõe duas regras de negócio usadas pelo algoritmo de estabilização:
   vazio — sinal de que os dados chegaram (mesmo que ainda instáveis).
 - `assinatura`: tupla com todos os campos, na ordem canônica — dois
   snapshots são "os mesmos dados" quando têm assinaturas iguais.
+- `possui_provedor_informado`: indica que o portal retornou pelo menos
+  um dos dois campos de provedor (`provedoresSIMET_regiao` ou
+  `provedor_do_estabelecimento`) — nem toda escola tem provedor
+  cadastrado, e a ausência não é tratada como erro.
 
 ### `ResultadoConsultaLote` e `StatusConsultaLote` (`lote/dominio/resultado_consulta.py`)
 

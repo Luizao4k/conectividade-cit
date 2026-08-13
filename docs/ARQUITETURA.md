@@ -2,16 +2,15 @@
 
 ## Visão geral
 
-O projeto segue **Clean Architecture** (regra de dependência: camadas
-externas dependem das internas, nunca o contrário) organizada em torno
+O projeto segue **Clean Architecture**, organizada em torno
 de dois *bounded contexts* (DDD) que compartilham a mesma base de
 código, mas resolvem problemas diferentes:
 
 ```
 src/conectividade/
-├── domain/             ┐
+├── domain/            ┐
 ├── application/        │  Bounded context: CONSULTA INDIVIDUAL
-├── gateway/            │  
+├── gateway/             │  (API pública da biblioteca)
 ├── infrastructure/     ┘
 │   ├── browser/         (compartilhado pelos dois contextos)
 │   ├── websocket/        \
@@ -103,8 +102,7 @@ ProcessarLoteUseCase
 ## Composition root
 
 Cada bounded context tem um único ponto onde as peças concretas de
-infraestrutura são instanciadas e conectadas às portas — nenhuma outra
-parte do código faz isso:
+infraestrutura são instanciadas e conectadas às portas:
 
 - Consulta individual: `factory.py` (`criar_consulta_service`).
 - Lote: `lote/infraestrutura/cli.py` (`main`).

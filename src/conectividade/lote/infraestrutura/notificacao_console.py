@@ -44,6 +44,10 @@ class NotificadorConsoleLote:
             print(f"Perda de pacotes: {dados.perda_pacote}")
             print(f"Medições: {dados.nro_medicoes}")
 
+            if dados.possui_provedor_informado:
+                print(f"Provedor(es) da escola: {dados.provedor_do_estabelecimento or '—'}")
+                print(f"Provedor(es) da região: {dados.provedoresSIMET_regiao or '—'}")
+
         print(f"Tempo: {resultado.tempo_segundos:.2f}s")
         print("=" * 80)
         print(f"[SALVO] Resultado gravado em: {self._arquivo_resultados}")
