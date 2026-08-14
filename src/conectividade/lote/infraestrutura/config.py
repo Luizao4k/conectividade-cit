@@ -20,6 +20,41 @@ DIRETORIO_DADOS: Path = _BASE_DIR / "dados"
 ARQUIVO_INEPS_PADRAO: Path = DIRETORIO_DADOS / "ineps.csv"
 DIRETORIO_RESULTADOS: Path = DIRETORIO_DADOS / "resultados"
 ARQUIVO_RESULTADOS_PADRAO: Path = DIRETORIO_RESULTADOS / "resultado_lote.csv"
+PERFIL_CHROME_PADRAO: Path = Path("./perfil_chrome")
+
+
+def arquivo_resultados_para_particao(indice_particao: int, total_particoes: int) -> Path:
+    """
+    Caminho padrão do CSV de resultados para uma instância, quando o
+    processamento está dividido em `total_particoes` instâncias.
+
+    Com `total_particoes == 1` devolve o caminho padrão de sempre
+    (`ARQUIVO_RESULTADOS_PADRAO`), sem sufixo — para não exigir nenhuma
+    mudança de quem já usa o CLI sem particionamento. Com mais de uma
+    partição, cada instância grava em um arquivo próprio
+    (`resultado_lote_parteN.csv`) para evitar que dois processos
+    escrevam no mesmo CSV ao mesmo tempo — ver
+    `docs/LOTE_OPERACIONAL.md#rodando-em-paralelo`.
+    """
+    if total_particoes <= 1:
+        return ARQUIVO_RESULTADOS_PADRAO
+
+    return DIRETORIO_RESULTADOS / f"resultado_lote_parte{indice_particao}.csv"
+
+
+def perfil_chrome_para_particao(indice_particao: int, total_particoes: int) -> Path:
+    """
+    Caminho padrão do perfil do Chrome para uma instância, quando o
+    processamento está dividido em `total_particoes` instâncias.
+
+    Cada instância precisa de um perfil próprio — dois processos do
+    Chrome não podem compartilhar o mesmo diretório de perfil
+    simultaneamente.
+    """
+    if total_particoes <= 1:
+        return PERFIL_CHROME_PADRAO
+
+    return Path(f"./perfil_chrome_parte{indice_particao}")
 
 
 @dataclass(frozen=True, slots=True)

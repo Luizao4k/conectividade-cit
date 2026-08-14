@@ -44,8 +44,15 @@ class ConsultorEscolaPortal(Protocol):
 
         `assinatura_anterior` é a assinatura dos dados da consulta bem
         sucedida anterior no mesmo lote (ou `None` na primeira consulta) —
-        necessária para o portal detectar que os dados antigos já foram
-        substituídos pelos novos antes de considerá-los estáveis.
+        útil para uma implementação que reaproveita a mesma sessão do
+        Shiny entre consultas, e por isso precisa distinguir dados
+        antigos ainda na tela de uma resposta nova (ver
+        `docs/LOTE_OPERACIONAL.md`). A implementação padrão
+        (`ConsultorEscolaPortalPolling`) recarrega a página a cada
+        consulta e ignora este parâmetro — nunca existe "dado antigo"
+        para uma sessão que acabou de começar —, mas o parâmetro segue
+        parte da porta para não travar outras estratégias que voltem a
+        reaproveitar a sessão entre consultas.
         """
         ...
 

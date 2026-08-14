@@ -2,12 +2,13 @@
 Detecção de que a resposta do portal para um INEP está completa e
 estável.
 
-Esta é a peça mais delicada do processamento em lote: como a consulta
-seguinte reaproveita o mesmo painel Shiny (sem recarregar a página), é
-preciso distinguir "os dados antigos ainda estão na tela" de "os dados
-novos já chegaram e pararam de mudar" — só aí é seguro considerar a
-consulta concluída. Ver `docs/LOTE_OPERACIONAL.md` para o racional
-completo do algoritmo.
+`ConsultorEscolaPortalPolling` recarrega a página antes de cada
+consulta (ver `docs/LOTE_OPERACIONAL.md`), então na prática este
+detector sempre roda com `assinatura_anterior=None` — o ramo "consultas
+seguintes" abaixo existe para o caso (hoje não usado) de uma
+implementação que reaproveite a mesma sessão do Shiny entre consultas,
+onde é preciso distinguir "os dados antigos ainda estão na tela" de
+"os dados novos já chegaram e pararam de mudar".
 
 O algoritmo abaixo é uma tradução direta (mesma lógica, mesmos limiares)
 do laço originalmente implementado em `main.py`, só reorganizado em uma

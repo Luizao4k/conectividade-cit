@@ -2,7 +2,8 @@
 
 ## Visão geral
 
-O projeto segue **Clean Architecture**, organizada em torno
+O projeto segue **Clean Architecture** (regra de dependência: camadas
+externas dependem das internas, nunca o contrário) organizada em torno
 de dois *bounded contexts* (DDD) que compartilham a mesma base de
 código, mas resolvem problemas diferentes:
 
@@ -35,19 +36,29 @@ para o mesmo problema, com trade-offs distintos:
 | | WebSocket (`infrastructure/shiny`) | Polling (`lote/infraestrutura/shiny_polling`) |
 |---|---|---|
 | Reage a | Cada frame recebido | Snapshot do estado a cada N ms |
-| Overhead | Baixo (orientado a evento) | Mais chamadas `page.evaluate` |
+| Overhead | Baixo (orientado a evento) | Mais chamadas `page.evaluate`, e recarrega a página a cada INEP |
 | Robustez a mudança de tags internas do Shiny | Alta (roteia pelo conteúdo) | Alta (não depende de tags) |
-| Detecta "dados antigos ainda na tela" entre consultas sucessivas | Não precisava até hoje (uma consulta por sessão) | Sim — é o problema central do lote, que reaproveita a mesma página para todos os INEPs |
+| Sessão do navegador | Uma consulta por sessão | Uma sessão de Chrome reaproveitada para o lote inteiro, mas com a **página** recarregada a cada INEP (ver abaixo) |
 | Operação | Programática (biblioteca) | Interativa (operador acompanha no terminal) |
 
-O processamento em lote precisa reaproveitar a mesma sessão de Chrome
-para centenas de INEPs seguidos (abrir um navegador por INEP seria
-proibitivamente lento), o que introduz um problema que a consulta
-individual não tem: como saber que os dados na tela já são os do INEP
-**atual**, e não sobras do INEP anterior? O algoritmo de estabilização
-em `lote/infraestrutura/shiny_polling/deteccao_estabilizacao.py` existe
-justamente para isso — ver
-[`docs/LOTE_OPERACIONAL.md`](LOTE_OPERACIONAL.md).
+O processamento em lote reaproveita a mesma sessão de Chrome (o mesmo
+perfil, cookies, proxy já configurado) para centenas de INEPs seguidos
+— abrir um navegador inteiro por INEP seria proibitivamente lento —,
+mas recarrega a **página** antes de cada consulta. Isso existe porque
+o portal não limpa todos os seus valores reativos entre consultas na
+mesma sessão: um campo que o Shiny não recalcula para o INEP atual
+(ex.: provedor, quando a escola não tem nenhum cadastrado) fica com o
+valor da consulta anterior, e seria salvo como se fosse informação
+real desta escola. Recarregar garante que cada consulta começa de uma
+sessão Shiny genuinamente vazia, ao custo de um tempo maior por
+consulta — ver
+[`docs/LOTE_OPERACIONAL.md`](LOTE_OPERACIONAL.md#por-que-cada-consulta-recarrega-a-página).
+
+Ainda assim, o algoritmo de estabilização em
+`lote/infraestrutura/shiny_polling/deteccao_estabilizacao.py` continua
+necessário: mesmo numa página recém-carregada, os componentes reativos
+do Shiny chegam de forma assíncrona, então é preciso esperar o estado
+parar de mudar antes de aceitar a resposta como completa.
 
 Em vez de forçar os dois problemas a compartilhar uma única
 implementação (o que arriscaria comportamento sutilmente diferente do
@@ -102,10 +113,19 @@ ProcessarLoteUseCase
 ## Composition root
 
 Cada bounded context tem um único ponto onde as peças concretas de
-infraestrutura são instanciadas e conectadas às portas:
+infraestrutura são instanciadas e conectadas às portas — nenhuma outra
+parte do código faz isso:
 
 - Consulta individual: `factory.py` (`criar_consulta_service`).
 - Lote: `lote/infraestrutura/cli.py` (`main`).
+
+Quando o lote roda particionado entre várias instâncias (ver
+[`docs/LOTE_OPERACIONAL.md#rodando-em-paralelo`](LOTE_OPERACIONAL.md#rodando-em-paralelo)),
+`RepositorioIneposParticionado` (`lote/infraestrutura/particionamento.py`)
+entra como um *decorator* sobre `RepositorioIneps` — implementa a mesma
+porta que envolve, então `ProcessarLoteUseCase` não sabe (nem precisa
+saber) que existe particionamento. É o composition root quem decide se
+o repositório de INEPs é usado puro ou decorado.
 
 ## Fluxo de dados — consulta individual
 
@@ -152,7 +172,10 @@ RepositorioResultadosLoteCsv.carregar_processados() → checkpoint
                   ▼
         ProcessarLoteUseCase.planejar()  → PlanoExecucaoLote (pendentes)
                   │
-    (para cada INEP pendente, em sequência, na mesma página)
+    (para cada INEP pendente, em sequência, na mesma sessão de Chrome)
+                  ▼
+        ConsultorEscolaPortalPolling._recarregar()  → page.reload() + reconfirma conexão do Shiny
+                  │
                   ▼
         EnviadorInep.enviar(inep)         → preenche o input do Shiny
                   │

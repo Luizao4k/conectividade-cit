@@ -80,30 +80,31 @@ inep,status,tempo,nome_escola,uf_escola,dependencia_escola,estudantes_escola,est
   escola tem provedor cadastrado; nesse caso a coluna fica vazia (não é
   um erro).
 
-### Por que o provedor às vezes fica vazio mesmo em escolas que talvez tenham provedor
+### Por que cada consulta recarrega a página
 
-O portal não limpa os campos de provedor quando a escola não tem
-nenhum cadastrado — o Shiny simplesmente não recalcula aquele valor
-reativo, então ele permanece na tela com o valor da **consulta
-anterior** dentro da mesma sessão de navegador. Sem tratamento, isso
-faria uma escola sem provedor aparecer no CSV com o provedor da escola
-consultada logo antes dela — um dado errado, não apenas incompleto.
+O portal não limpa alguns dos seus valores reativos entre consultas
+que reaproveitam a mesma sessão — o caso mais visível é
+`provedor_do_estabelecimento`: quando uma escola não tem provedor
+cadastrado, o Shiny simplesmente não recalcula aquele valor, e ele
+permanece na tela com o valor da consulta anterior. Sem tratamento,
+isso faria uma escola sem provedor aparecer no CSV com o provedor de
+outra escola — um dado errado, não apenas incompleto.
 
-Para evitar isso, `DadosEscolaLote.descartando_provedores_nao_atualizados`
-(aplicado em `ProcessarLoteUseCase`, só no momento de salvar/exibir o
-resultado — nunca no valor usado internamente para detectar
-estabilização) compara o provedor da consulta atual com o da consulta
-anterior: se forem **idênticos**, assume que não foi realmente
-atualizado para esta escola e grava vazio em vez do valor repetido.
+Em vez de tentar detectar caso a caso quais campos foram realmente
+atualizados (uma solução por heurística, sujeita a falsos positivos e
+negativos), `ConsultorEscolaPortalPolling` recarrega a página do
+portal antes de cada INEP (`page.reload()` + reconfirmação de que o
+Shiny reconectou). Cada consulta começa de uma sessão genuinamente
+vazia — não existe "dado de consulta anterior" para vazar, em nenhum
+campo, não só nos de provedor. O algoritmo de estabilização trata toda
+consulta como se fosse a primeira do lote.
 
-**Escopo**: esse descarte se aplica só a `provedor_do_estabelecimento`
-(o provedor específico da escola). `provedoresSIMET_regiao` (a lista de
-provedores da região) **nunca** é descartado automaticamente, porque é
-um dado por região — duas escolas vizinhas no mesmo lote legitimamente
-têm a mesma lista, e descartar por coincidência apagaria dado real com
-frequência. Se no futuro for necessário o mesmo tratamento para
-`provedoresSIMET_regiao`, ajuste `_CAMPOS_PROVEDOR_SUJEITOS_A_DESCARTE`
-em `lote/aplicacao/processar_lote_use_case.py`.
+**O custo dessa correção é tempo**: recarregar a página e esperar o
+WebSocket do Shiny reconectar acontece **antes** da espera normal de
+estabilização (5s), então o tempo médio por INEP aumenta em relação a
+reaproveitar a mesma sessão para o lote inteiro. Em compensação, todo
+campo vazio no resultado é genuinamente vazio — nunca uma sobra de
+outra escola.
 
 > **Nota de migração**: se você já tinha um `resultado_lote.csv` gerado
 > antes das colunas `provedoresSIMET_regiao`/`provedor_do_estabelecimento`
@@ -131,24 +132,28 @@ Este é o núcleo do processamento em lote, e a razão de ele existir como
 um mecanismo separado da consulta individual (ver
 [`ARQUITETURA.md`](ARQUITETURA.md#por-que-dois-mecanismos-de-consulta)).
 
-**O problema**: para não pagar o custo de abrir um navegador por INEP,
-o lote reaproveita a mesma página do Shiny para centenas de consultas
-seguidas. Isso significa que, ao enviar um novo INEP, os dados
-exibidos na tela ainda são os do INEP anterior por um tempo — e o
-Shiny não avisa "prontinho, atualizei tudo". É preciso *inferir* isso
-observando o estado reativo.
+**O problema**: mesmo com a página recarregada a cada INEP (ver seção
+acima), os componentes reativos do Shiny não chegam todos de uma vez —
+cada um (nome da escola, velocidade, provedores...) é recalculado e
+enviado ao navegador de forma independente e assíncrona. O Shiny não
+avisa "prontinho, todos os componentes terminaram" — é preciso
+*inferir* isso observando o estado reativo parar de mudar.
 
 **A estratégia** (`lote/infraestrutura/shiny_polling/deteccao_estabilizacao.py`):
 a cada `intervalo_polling` segundos (padrão 0.5s), lê-se
 `Shiny.shinyapp.$values` e calcula-se uma **assinatura** (tupla com
 todos os campos relevantes). A resposta só é aceita como definitiva
-quando a assinatura:
+quando a assinatura permanece **idêntica** por `tempo_estabilizacao`
+segundos seguidos (padrão 5s) — prova de que o Shiny já terminou de
+recalcular todos os componentes reativos, não só o primeiro a
+responder.
 
-1. É diferente da assinatura da consulta **anterior** bem-sucedida no
-   mesmo lote (prova de que os dados realmente mudaram); **e**
-2. Permanece **idêntica** por `tempo_estabilizacao` segundos seguidos
-   (padrão 5s) — prova de que o Shiny já terminou de recalcular todos
-   os componentes reativos, não só o primeiro a responder.
+> O detector também sabe lidar com o caso de uma sessão **não**
+> recarregada entre consultas (comparando com a assinatura da consulta
+> anterior) — hoje esse ramo nunca é exercitado, porque
+> `ConsultorEscolaPortalPolling` sempre recarrega antes de consultar,
+> mas a lógica continua correta caso uma futura implementação volte a
+> reaproveitar a sessão.
 
 ```
 Envia INEP
@@ -163,11 +168,8 @@ Shiny já registrou este INEP como input atual? ──não──► aguarda e te
 Lê Shiny.$values
     │
     ▼
-Tem nome de escola (dado válido)? ──não──► "dados anteriores foram limpos", aguarda
+Tem nome de escola (dado válido)? ──não──► "dados ainda carregando", aguarda
     │ sim
-    ▼
-Assinatura == assinatura da consulta anterior? ──sim──► "dados antigos ainda na tela", aguarda
-    │ não
     ▼
 Assinatura mudou desde a última leitura? ──sim──► reinicia o cronômetro de estabilidade, aguarda
     │ não (está parado)
@@ -214,3 +216,85 @@ use_case = ProcessarLoteUseCase(
 plano = use_case.planejar()
 resumo = use_case.executar(plano, consultor=ConsultorFalso())
 ```
+
+## Rodando em paralelo
+
+Com lotes grandes (ex.: ~1000 INEPs a ~20s cada ≈ 5,5h em sequência),
+dá para dividir o trabalho entre várias instâncias do CLI rodando ao
+mesmo tempo, cada uma com sua própria sessão de Chrome. Não há nenhuma
+mudança no algoritmo de estabilização em si — cada instância consulta
+seu próprio recorte de INEPs de forma totalmente independente das
+demais.
+
+```bash
+# terminal 1
+conectividade-lote --particoes 2 --indice-particao 0
+
+# terminal 2
+conectividade-lote --particoes 2 --indice-particao 1
+```
+
+Com essas duas flags:
+
+- `--arquivo-ineps` pode continuar apontando para o **mesmo**
+  `ineps.csv` nas duas instâncias — cada uma filtra sua própria fatia
+  automaticamente, não é preciso pré-dividir o arquivo.
+- `--arquivo-resultados` e `--perfil-chrome` são derivados
+  automaticamente por partição (`resultado_lote_parte0.csv`,
+  `resultado_lote_parte1.csv`, `perfil_chrome_parte0`,
+  `perfil_chrome_parte1`, ...) — cada instância **precisa** de um
+  perfil de Chrome próprio (dois processos não podem compartilhar o
+  mesmo diretório de perfil ao mesmo tempo) e de um arquivo de saída
+  próprio (para não haver duas instâncias escrevendo no mesmo CSV ao
+  mesmo tempo, o que arriscaria corromper linhas). Se quiser escolher
+  os caminhos manualmente, use `--arquivo-resultados` e
+  `--perfil-chrome` explicitamente.
+- Sem `--particoes` (ou com `--particoes 1`), o comportamento é
+  idêntico ao de antes — nenhuma mudança para quem usa uma única
+  instância.
+
+### Particionamento intercalado (round-robin)
+
+`RepositorioIneposParticionado` divide a lista pelo índice de cada
+INEP na ordem em que aparece no CSV: o INEP de índice `i` cabe à
+instância onde `i % particoes == indice_particao`. Ou seja, com 2
+partições, a instância 0 pega os INEPs 1º, 3º, 5º... e a instância 1
+pega o 2º, 4º, 6º... Isso tende a distribuir melhor eventuais trechos
+mais lentos do arquivo entre as instâncias do que dividir em blocos
+contínuos (ex.: primeira metade / segunda metade).
+
+Cada instância mantém seu próprio checkpoint, no seu próprio arquivo
+de resultado — interromper uma delas não afeta a outra, e rodar de
+novo só aquela instância retoma de onde parou, normalmente.
+
+### Combinando os resultados no final
+
+Depois que as instâncias terminarem, combine os CSVs de cada uma em um
+único arquivo com `conectividade-lote-merge`:
+
+```bash
+conectividade-lote-merge \
+    --saida dados/resultados/resultado_lote.csv \
+    dados/resultados/resultado_lote_parte0.csv \
+    dados/resultados/resultado_lote_parte1.csv
+```
+
+Como o particionamento é intercalado e disjunto, não há risco de
+duplicar INEPs — o utilitário só valida que todos os arquivos de
+origem têm exatamente as mesmas colunas antes de combinar (evita um
+CSV desalinhado se um dos arquivos vier de uma versão diferente do
+sistema).
+
+### O que considerar antes de escalar além de 2 instâncias
+
+- **Recursos da máquina**: cada Chrome headful consome uma quantidade
+  razoável de RAM. Se a máquina ficar sob carga pesada, o próprio
+  tempo de estabilização (que é de relógio, não adaptativo) pode
+  piorar, aumentando a taxa de `timeout`.
+- **Proxy/rede compartilhada**: se houver algum limite por IP ou por
+  sessão no portal ou no proxy corporativo, isso só aparece na prática
+  — vale observar a taxa de `erro`/`timeout` com 2 instâncias antes de
+  ir para mais.
+- **Confirmação manual**: o `Pressione ENTER...` continua sendo por
+  instância — com mais instâncias, mais janelas para confirmar
+  manualmente no início.

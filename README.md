@@ -57,6 +57,11 @@ for interrompido, rodar de novo retoma de onde parou. Veja
 [`docs/LOTE_OPERACIONAL.md`](docs/LOTE_OPERACIONAL.md) para o formato
 dos arquivos e o algoritmo de estabilização.
 
+Para lotes grandes, dá para rodar várias instâncias em paralelo
+(`--particoes`/`--indice-particao`) e combinar os resultados no final
+com `conectividade-lote-merge` — ver
+[`docs/LOTE_OPERACIONAL.md#rodando-em-paralelo`](docs/LOTE_OPERACIONAL.md#rodando-em-paralelo).
+
 ## Documentação
 
 - [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md) — visão geral das
@@ -69,7 +74,12 @@ dos arquivos e o algoritmo de estabilização.
 - [`docs/LOTE_OPERACIONAL.md`](docs/LOTE_OPERACIONAL.md) — o CLI de
   processamento em lote (polling + CSV).
 
+## Desenvolvimento
 
+```bash
+pip install -e ".[dev]"
+mypy src
+```
 
 ## Status
 

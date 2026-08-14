@@ -13,7 +13,7 @@ o contrato do arquivo de resultados. Ver `docs/LOTE_OPERACIONAL.md`.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, ClassVar, Mapping
 
 _PADRAO_SPAN_HTML = re.compile(r"<span[^>]*>(.*?)</span>", re.DOTALL)
@@ -142,55 +142,6 @@ class DadosEscolaLote:
         (ver `DetectorEstabilizacao`).
         """
         return tuple(getattr(self, campo) for campo in self.CAMPOS)
-
-    def descartando_provedores_nao_atualizados(
-        self,
-        assinatura_anterior: tuple[Any, ...] | None,
-        *,
-        campos: tuple[str, ...] | None = None,
-    ) -> "DadosEscolaLote":
-        """
-        Devolve uma cópia com os campos de provedor zerados quando eles
-        não mudaram em relação à consulta anterior do lote.
-
-        O portal não limpa `provedoresSIMET_regiao` /
-        `provedor_do_estabelecimento` quando a escola não tem provedor
-        cadastrado — o Shiny simplesmente não recalcula esse valor
-        reativo, então ele permanece na tela com o valor da consulta
-        anterior. Como os demais campos (nome, endereço, velocidade...)
-        mudam normalmente quando uma nova escola é carregada, um valor de
-        provedor idêntico ao da consulta anterior é interpretado como
-        "não atualizado para esta escola" e descartado (`None`) em vez
-        de gravado como se fosse informação real desta escola.
-
-        Limitação conhecida: como `provedoresSIMET_regiao` é por região
-        (não por escola), duas escolas vizinhas consultadas em sequência
-        podem legitimamente ter o mesmo valor — nesse caso ele também
-        seria descartado aqui, mesmo sendo dado real. Preferimos esse
-        falso negativo (campo vazio quando na verdade era igual) a um
-        falso positivo (mostrar o provedor de outra escola). Por causa
-        disso, `ProcessarLoteUseCase` chama este método restringindo
-        `campos=("provedor_do_estabelecimento",)` — só o provedor
-        específico da escola, bem menos sujeito a essa coincidência.
-        `provedoresSIMET_regiao` nunca é descartado automaticamente.
-        """
-        if assinatura_anterior is None:
-            return self
-
-        campos_alvo = campos if campos is not None else self.CAMPOS_PROVEDOR
-        indices = {campo: self.CAMPOS.index(campo) for campo in campos_alvo}
-        descartes = {
-            campo: None
-            for campo, indice in indices.items()
-            if getattr(self, campo) is not None
-            and indice < len(assinatura_anterior)
-            and getattr(self, campo) == assinatura_anterior[indice]
-        }
-
-        if not descartes:
-            return self
-
-        return replace(self, **descartes)
 
     def como_dict(self) -> dict[str, Any]:
         """Representação em dicionário, na ordem canônica dos campos."""
