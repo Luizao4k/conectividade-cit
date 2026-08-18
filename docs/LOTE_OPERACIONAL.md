@@ -9,7 +9,7 @@ retomar um lote interrompido a qualquer momento.
 ```bash
 conectividade-lote
 # equivalente a:
-python -m conectividade.lote.infraestrutura.cli
+python -m conectividade.infraestrutura.cli
 ```
 
 O comando:
@@ -128,9 +128,9 @@ outra escola.
 
 ## O algoritmo de estabilização
 
-Este é o núcleo do processamento em lote, e a razão de ele existir como
-um mecanismo separado da consulta individual (ver
-[`ARQUITETURA.md`](ARQUITETURA.md#por-que-dois-mecanismos-de-consulta)).
+Este é o núcleo do processamento em lote — ver
+[`ARQUITETURA.md`](ARQUITETURA.md#por-que-polling-e-não-escutar-o-websocket-do-shiny)
+para o porquê da estratégia de polling.
 
 **O problema**: mesmo com a página recarregada a cada INEP (ver seção
 acima), os componentes reativos do Shiny não chegam todos de uma vez —
@@ -139,7 +139,7 @@ enviado ao navegador de forma independente e assíncrona. O Shiny não
 avisa "prontinho, todos os componentes terminaram" — é preciso
 *inferir* isso observando o estado reativo parar de mudar.
 
-**A estratégia** (`lote/infraestrutura/shiny_polling/deteccao_estabilizacao.py`):
+**A estratégia** (`infraestrutura/shiny_polling/deteccao_estabilizacao.py`):
 a cada `intervalo_polling` segundos (padrão 0.5s), lê-se
 `Shiny.shinyapp.$values` e calcula-se uma **assinatura** (tupla com
 todos os campos relevantes). A resposta só é aceita como definitiva
@@ -184,7 +184,7 @@ Se nenhum destes critérios for satisfeito em até `timeout_resposta`
 segundos (padrão 60s), o resultado é `timeout`.
 
 Os limiares de tempo estão centralizados em
-`lote/infraestrutura/config.py` (`LimitesDeTempo`), com os mesmos
+`infraestrutura/config.py` (`LimitesDeTempo`), com os mesmos
 valores já validados em produção:
 
 | Limite | Padrão | Papel |
@@ -199,7 +199,7 @@ valores já validados em produção:
 
 `ProcessarLoteUseCase` (a orquestração do lote) não depende de
 Playwright — só das portas `RepositorioIneps`, `RepositorioResultadosLote`
-e `ConsultorEscolaPortal` (`lote/aplicacao/portas.py`). Isso permite
+e `ConsultorEscolaPortal` (`aplicacao/portas.py`). Isso permite
 testar toda a lógica de checkpoint, propagação de assinatura entre
 consultas e contagem do resumo final com objetos de teste simples, sem
 tocar em CSV nem em navegador:

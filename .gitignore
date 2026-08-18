@@ -27,8 +27,6 @@ htmlcov/
 # --- Playwright ---
 playwright-report/
 perfil_chrome/
-perfil_chrome_parte1/
-perfil_chrome_parte0/
 test-results/
 *.trace.zip
 
@@ -37,7 +35,6 @@ test-results/
 .env
 .env.*
 !.env.example
-src/conectividade/dados/resultados/*
 
 # --- Editores / SO ---
 .vscode/

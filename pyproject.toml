@@ -1,7 +1,7 @@
 [project]
 name = "conectividade"
-version = "0.3.0"
-description = "Consulta ao portal Conectividade na Educação por código INEP."
+version = "0.4.0"
+description = "Consulta em lote (com processamento paralelo) ao portal Conectividade na Educação por código INEP."
 requires-python = ">=3.11"
 dependencies = [
     "playwright>=1.40",
@@ -14,8 +14,8 @@ dev = [
 ]
 
 [project.scripts]
-conectividade-lote = "conectividade.lote.infraestrutura.cli:main"
-conectividade-lote-merge = "conectividade.lote.infraestrutura.merge_resultados:main"
+conectividade-lote = "conectividade.infraestrutura.cli:main"
+conectividade-lote-merge = "conectividade.infraestrutura.merge_resultados:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

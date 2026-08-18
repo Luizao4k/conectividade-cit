@@ -3,171 +3,105 @@
 ## Visão geral
 
 O projeto segue **Clean Architecture** (regra de dependência: camadas
-externas dependem das internas, nunca o contrário) organizada em torno
-de dois *bounded contexts* (DDD) que compartilham a mesma base de
-código, mas resolvem problemas diferentes:
+externas dependem das internas, nunca o contrário) em torno de um único
+propósito: consultar o portal Conectividade na Educação em lote, a
+partir de um CSV de INEPs, com suporte a retomada e a execução
+paralela.
 
 ```
 src/conectividade/
-├── domain/            ┐
-├── application/        │  Bounded context: CONSULTA INDIVIDUAL
-├── gateway/             │  (API pública da biblioteca)
-├── infrastructure/     ┘
-│   ├── browser/         (compartilhado pelos dois contextos)
-│   ├── websocket/        \
-│   └── shiny/             > só usados pela consulta individual
-├── factory.py             /
-├── __init__.py           (API pública: criar_consulta_service)
-│
-└── lote/               ┐
-    ├── dominio/          │  Bounded context: PROCESSAMENTO EM LOTE
-    ├── aplicacao/         │  (CLI operacional via CSV)
-    └── infraestrutura/  ┘
+├── dominio/            entidades e value objects (DadosEscolaLote,
+│                        ResultadoConsultaLote, StatusConsultaLote, ...)
+├── aplicacao/           caso de uso (ProcessarLoteUseCase) + portas (Protocol)
+└── infraestrutura/      implementações concretas das portas:
+    ├── browser.py                     abre/fecha uma sessão persistente do Chrome
+    ├── csv_ineps_repositorio.py
+    ├── csv_resultados_repositorio.py
+    ├── particionamento.py
+    ├── merge_resultados.py
+    ├── cli.py                         composition root
+    └── shiny_polling/                 consulta ao portal por polling
 ```
 
-### Por que dois mecanismos de consulta?
+Não existe API pública própria neste pacote — o ponto de entrada é
+sempre o CLI (`conectividade-lote`, definido em `infraestrutura/cli.py`).
 
-Historicamente o projeto tinha duas implementações concorrentes: uma
-biblioteca orientada a eventos (intercepta frames de WebSocket) e um
-script de lote que fazia *polling* direto do estado reativo do Shiny
-(`Shiny.shinyapp.$values`). São estratégias genuinamente diferentes
-para o mesmo problema, com trade-offs distintos:
+## Por que polling, e não escutar o WebSocket do Shiny
 
-| | WebSocket (`infrastructure/shiny`) | Polling (`lote/infraestrutura/shiny_polling`) |
-|---|---|---|
-| Reage a | Cada frame recebido | Snapshot do estado a cada N ms |
-| Overhead | Baixo (orientado a evento) | Mais chamadas `page.evaluate`, e recarrega a página a cada INEP |
-| Robustez a mudança de tags internas do Shiny | Alta (roteia pelo conteúdo) | Alta (não depende de tags) |
-| Sessão do navegador | Uma consulta por sessão | Uma sessão de Chrome reaproveitada para o lote inteiro, mas com a **página** recarregada a cada INEP (ver abaixo) |
-| Operação | Programática (biblioteca) | Interativa (operador acompanha no terminal) |
+O portal é uma aplicação Shiny (R): os dados de cada INEP chegam ao
+navegador via WebSocket, em frames que o servidor envia conforme cada
+componente reativo termina de calcular. Em vez de interceptar esses
+frames (o que exige decodificar o protocolo interno do Shiny e rotear
+cada frame para o parser certo), a estratégia adotada aqui é mais
+direta: ler `Shiny.shinyapp.$values` periodicamente (`page.evaluate`)
+até os dados pararem de mudar — ver
+[`docs/LOTE_OPERACIONAL.md`](LOTE_OPERACIONAL.md#o-algoritmo-de-estabilização)
+para o algoritmo completo.
 
-O processamento em lote reaproveita a mesma sessão de Chrome (o mesmo
-perfil, cookies, proxy já configurado) para centenas de INEPs seguidos
-— abrir um navegador inteiro por INEP seria proibitivamente lento —,
-mas recarrega a **página** antes de cada consulta. Isso existe porque
-o portal não limpa todos os seus valores reativos entre consultas na
-mesma sessão: um campo que o Shiny não recalcula para o INEP atual
-(ex.: provedor, quando a escola não tem nenhum cadastrado) fica com o
-valor da consulta anterior, e seria salvo como se fosse informação
-real desta escola. Recarregar garante que cada consulta começa de uma
-sessão Shiny genuinamente vazia, ao custo de um tempo maior por
-consulta — ver
-[`docs/LOTE_OPERACIONAL.md`](LOTE_OPERACIONAL.md#por-que-cada-consulta-recarrega-a-página).
-
-Ainda assim, o algoritmo de estabilização em
-`lote/infraestrutura/shiny_polling/deteccao_estabilizacao.py` continua
-necessário: mesmo numa página recém-carregada, os componentes reativos
-do Shiny chegam de forma assíncrona, então é preciso esperar o estado
-parar de mudar antes de aceitar a resposta como completa.
-
-Em vez de forçar os dois problemas a compartilhar uma única
-implementação (o que arriscaria comportamento sutilmente diferente do
-já validado em produção), o refactor manteve os dois mecanismos como
-bounded contexts separados, cada um com seu próprio domínio,
-aplicação e infraestrutura — compartilhando apenas o que é
-genuinamente comum (a classe `Browser`, que só abre/fecha o navegador
-e não sabe nada de Shiny).
+Essa abordagem é operacionalmente mais simples de rodar e de depurar
+(o operador acompanha o progresso no terminal, em uma sessão de Chrome
+visível), o que importa para um processo em lote de longa duração que
+alguém acompanha manualmente.
 
 ## Camadas (regra de dependência)
 
-Em cada bounded context, a dependência aponta sempre para dentro:
+A dependência aponta sempre para dentro:
 
 ```
 infraestrutura  →  aplicação  →  domínio
-      ↑                              
+      ↑
       └── nunca o contrário: domínio e aplicação não importam infraestrutura
 ```
 
-- **Domínio** (`domain/` e `lote/dominio/`): entidades, value objects e
-  regras de negócio puras. Sem I/O, sem Playwright, sem CSV. Pode ser
-  testado sem navegador.
-- **Aplicação** (`application/` e `lote/aplicacao/`): casos de uso que
-  orquestram o domínio através de **portas** (`Protocol`s) — interfaces
-  que a infraestrutura implementa. A aplicação não sabe se a porta é
-  implementada com Playwright, um mock de teste, ou outra coisa.
-- **Infraestrutura** (`infrastructure/` e `lote/infraestrutura/`):
-  implementações concretas das portas — Playwright, WebSocket, CSV,
-  console. É a única camada que conhece bibliotecas externas.
-- **Gateway** (`gateway/`, só no contexto de consulta individual): o
-  adapter que implementa a porta de domínio `ConsultaEscolaGateway`
-  usando `ShinyClient`. Existe como camada própria (em vez de dentro de
-  `infrastructure/`) para deixar explícito que é *a* porta de saída do
-  domínio — não apenas mais um detalhe de infraestrutura.
+- **Domínio** (`dominio/`): entidades, value objects e regras de
+  negócio puras. Sem I/O, sem Playwright, sem CSV. Pode ser testado
+  sem navegador.
+- **Aplicação** (`aplicacao/`): o caso de uso
+  (`ProcessarLoteUseCase`) que orquestra o domínio através de
+  **portas** (`Protocol`s definidos em `aplicacao/portas.py`) —
+  interfaces que a infraestrutura implementa. A aplicação não sabe se
+  uma porta é implementada com Playwright, CSV, ou um objeto de teste.
+- **Infraestrutura** (`infraestrutura/`): implementações
+  concretas das portas — Playwright, CSV, console. É a única camada
+  que conhece bibliotecas externas.
 
 ### Portas e inversão de dependência
 
-Cada caso de uso depende de `Protocol`s definidos por ele mesmo (ex.:
-`lote/aplicacao/portas.py`), nunca de uma classe concreta de
-infraestrutura. Isso é o que permite testar `ProcessarLoteUseCase` (ou
-`ConsultaEscolaService`) inteiramente sem abrir um navegador: basta
-passar um objeto qualquer com os métodos certos.
+`ProcessarLoteUseCase` depende de `Protocol`s, nunca de uma classe
+concreta:
 
 ```
 ProcessarLoteUseCase
       depende de
-        ├── RepositorioIneps (Protocol)        ← implementado por RepositorioIneposCsv
+        ├── RepositorioIneps (Protocol)          ← implementado por RepositorioIneposCsv
         ├── RepositorioResultadosLote (Protocol) ← implementado por RepositorioResultadosLoteCsv
         └── ConsultorEscolaPortal (Protocol)     ← implementado por ConsultorEscolaPortalPolling
 ```
 
+Isso é o que permite testar o caso de uso inteiro sem abrir um
+navegador: basta passar um objeto qualquer com os métodos certos (ver
+["Testando sem navegador"](#testando-sem-navegador) abaixo).
+
 ## Composition root
 
-Cada bounded context tem um único ponto onde as peças concretas de
-infraestrutura são instanciadas e conectadas às portas — nenhuma outra
-parte do código faz isso:
-
-- Consulta individual: `factory.py` (`criar_consulta_service`).
-- Lote: `lote/infraestrutura/cli.py` (`main`).
+`infraestrutura/cli.py` (`main`) é o único ponto do sistema onde
+as peças concretas são instanciadas e conectadas às portas — nenhuma
+outra parte do código faz isso.
 
 Quando o lote roda particionado entre várias instâncias (ver
 [`docs/LOTE_OPERACIONAL.md#rodando-em-paralelo`](LOTE_OPERACIONAL.md#rodando-em-paralelo)),
-`RepositorioIneposParticionado` (`lote/infraestrutura/particionamento.py`)
+`RepositorioIneposParticionado` (`infraestrutura/particionamento.py`)
 entra como um *decorator* sobre `RepositorioIneps` — implementa a mesma
 porta que envolve, então `ProcessarLoteUseCase` não sabe (nem precisa
 saber) que existe particionamento. É o composition root quem decide se
 o repositório de INEPs é usado puro ou decorado.
 
-## Fluxo de dados — consulta individual
+## Fluxo de dados
 
 ```
-Navegador Chrome
-      │
-      ▼
-Aplicação Shiny (WebSocket)
-      │
-      ▼
-WebSocketListener               (infrastructure/websocket)
-      │
-      ▼
-ShinyClient                     (infrastructure/shiny)
-      │  decodifica envelope, normaliza HTML
-      ▼
-RoteadorDeFrames                (infrastructure/shiny/frame_router.py)
-      │
-      ├──► EscolaFrameParser ─────► EscolaFrameDTO
-      ├──► ConectividadeFrameParser ► ConectividadeFrameDTO
-      └──► ProvedoresFrameParser ──► ProvedoresFrameDTO
-                  │
-                  ▼
-        AgregadorDeConsulta        (acumula até `completo`)
-                  │
-                  ▼
-           mapeadores.py            (DTO → entidades de domínio)
-                  │
-                  ▼
-            ConsultaEscola          (entidade de domínio)
-```
-
-Cada frame é testado contra **todos** os parsers (não só o primeiro que
-reconhecer), porque um mesmo frame pode conter campos de mais de um
-domínio simultaneamente — parar no primeiro match descartaria
-silenciosamente os demais campos.
-
-## Fluxo de dados — processamento em lote
-
-```
-RepositorioIneposCsv.carregar()          → lista de INEPs
-RepositorioResultadosLoteCsv.carregar_processados() → checkpoint
+RepositorioIneposCsv.carregar()                       → lista de INEPs
+  (decorado por RepositorioIneposParticionado, se houver particionamento)
+RepositorioResultadosLoteCsv.carregar_processados()   → checkpoint
                   │
                   ▼
         ProcessarLoteUseCase.planejar()  → PlanoExecucaoLote (pendentes)
@@ -190,14 +124,16 @@ RepositorioResultadosLoteCsv.carregar_processados() → checkpoint
 ```
 
 Veja [`docs/LOTE_OPERACIONAL.md`](LOTE_OPERACIONAL.md) para o detalhe
-do algoritmo de estabilização.
+do algoritmo de estabilização, o motivo do recarregamento por consulta,
+e o particionamento entre instâncias paralelas.
 
 ## Testando sem navegador
 
 Como domínio e aplicação não dependem de Playwright, é possível
-exercitar toda a lógica de negócio com objetos de teste simples
-(`Protocol`s não exigem herança — qualquer objeto com os métodos certos
-serve):
+exercitar toda a lógica de negócio (checkpoint, propagação de estado
+entre consultas, contagem do resumo final) com objetos de teste
+simples (`Protocol`s não exigem herança — qualquer objeto com os
+métodos certos serve):
 
 ```python
 class ConsultorFalso:

@@ -1,44 +1,15 @@
 """
-Módulo de consulta ao portal Conectividade na Educação.
+Consulta em lote ao portal Conectividade na Educação por código INEP.
 
-Uso:
+Uso (ver `docs/LOTE_OPERACIONAL.md` para o guia completo):
 
-    from conectividade import criar_consulta_service
-    from conectividade.infrastructure.browser import Browser
+    python -m conectividade.infraestrutura.cli --particoes 2 --indice-particao 0
+    python -m conectividade.infraestrutura.cli --particoes 2 --indice-particao 1
+    # ou, após `pip install -e .`:
+    conectividade-lote --particoes 2 --indice-particao 0
 
-    with Browser(url_portal=URL_PORTAL, headless=False) as browser:
-        browser.abrir_portal()  # ou navegue manualmente, se houver um passo de proxy
-        consulta_service = criar_consulta_service(browser.page)
-
-        resultado = consulta_service.consultar("15001156")
-        resultados = consulta_service.consultar_lote(["15001156", "11000222"])
-
-Veja `docs/CONSULTA_INDIVIDUAL.md` para o guia completo.
+Este pacote não expõe uma API pública própria — o ponto de entrada é o
+CLI de lote (`conectividade.infraestrutura.cli`). Veja
+`docs/ARQUITETURA.md` e `docs/LOTE_OPERACIONAL.md`.
 """
 from __future__ import annotations
-
-from conectividade.application.consulta_escola_service import ConsultaEscolaService
-from conectividade.domain.conectividade import Conectividade
-from conectividade.domain.consulta_escola import ConsultaEscola
-from conectividade.domain.erro_consulta import ErroConsulta
-from conectividade.domain.escola import Escola
-from conectividade.domain.exceptions import (
-    ConsultaEscolaError,
-    EscolaNaoEncontradaError,
-    RespostaIncompletaError,
-)
-from conectividade.domain.provedores import Provedores
-from conectividade.factory import criar_consulta_service
-
-__all__ = [
-    "criar_consulta_service",
-    "ConsultaEscolaService",
-    "ConsultaEscola",
-    "Escola",
-    "Conectividade",
-    "Provedores",
-    "ErroConsulta",
-    "ConsultaEscolaError",
-    "EscolaNaoEncontradaError",
-    "RespostaIncompletaError",
-]
